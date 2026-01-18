@@ -157,7 +157,649 @@ return (
 - Puoi passare dati ai componenti con le **props**.
 - Il nome del componente deve iniziare con lettera **maiuscola**.
 
+---# Appunti Full Stack Open (continuazione)
+_State, rendering, gestione di oggetti e array, regole degli Hook, event handling avanzato_
+
 ---
+
+## 1) Un cambio di stato causa re-render
+
+Rivediamo il flusso di base di un’app React.
+
+Quando l’applicazione viene inizializzata, il componente `App` viene **eseguito**. Dentro `App`:
+
+- viene chiamato `useState` per creare lo stato dell’app
+- il valore di stato viene mostrato a schermo tramite JSX
+- vengono renderizzati componenti figli (es. `Display`, `Button`)
+- ai bottoni vengono passati degli **event handler** (funzioni) che cambiano lo stato
+
+Quando clicchi un bottone:
+
+1. React esegue l’event handler
+2. l’event handler chiama `setCounter(...)` (o un altro setter di stato)
+3. React pianifica un aggiornamento di stato e fa il **re-render**
+4. `App` viene rieseguito
+5. i componenti figli ricevono nuove props e la UI si aggiorna
+
+Esempio (concettuale):
+
+- valore iniziale `counter = 0`
+- clic su “plus” -> `setCounter(1)`
+- `App` viene rieseguito e `Display` mostra `1`
+
+---
+
+## 2) Complex state: più pezzi di stato
+
+Se la UI ha più informazioni indipendenti, puoi usare `useState` più volte.
+
+Esempio con due contatori separati:
+
+```jsx
+const App = () => {
+  const [left, setLeft] = useState(0)
+  const [right, setRight] = useState(0)
+
+  return (
+    <div>
+      {left}
+      <button onClick={() => setLeft(left + 1)}>left</button>
+      <button onClick={() => setRight(right + 1)}>right</button>
+      {right}
+    </div>
+  )
+}
+```
+
+Il componente ha accesso a `setLeft` e `setRight`, che aggiornano due parti di stato diverse.
+
+---
+
+## 3) Salvare più valori in un singolo oggetto (e perché può complicare)
+
+Lo stato può essere di qualunque tipo. Potresti rappresentare lo stesso scenario con un oggetto:
+
+```js
+{
+  left: 0,
+  right: 0
+}
+```
+
+Esempio completo:
+
+```jsx
+const App = () => {
+  const [clicks, setClicks] = useState({ left: 0, right: 0 })
+
+  const handleLeftClick = () => {
+    const newClicks = {
+      left: clicks.left + 1,
+      right: clicks.right,
+    }
+    setClicks(newClicks)
+  }
+
+  const handleRightClick = () => {
+    const newClicks = {
+      left: clicks.left,
+      right: clicks.right + 1,
+    }
+    setClicks(newClicks)
+  }
+
+  return (
+    <div>
+      {clicks.left}
+      <button onClick={handleLeftClick}>left</button>
+      <button onClick={handleRightClick}>right</button>
+      {clicks.right}
+    </div>
+  )
+}
+```
+
+Qui lo stato è “uno solo”, ma ogni update richiede di copiare anche i campi che non cambiano. È facile rendere il codice più verboso del necessario.
+
+### 3.1 Object spread per aggiornare uno stato-oggetto
+
+Per aggiornare “solo una proprietà” mantenendo le altre, usa lo **spread**:
+
+```jsx
+const handleLeftClick = () =>
+  setClicks({ ...clicks, left: clicks.left + 1 })
+
+const handleRightClick = () =>
+  setClicks({ ...clicks, right: clicks.right + 1 })
+```
+
+- `{ ...clicks }` crea un nuovo oggetto copiando tutte le proprietà
+- specificando una proprietà dopo lo spread (es. `right: ...`) la sovrascrivi con il nuovo valore
+
+Esempio:
+
+```js
+{ ...clicks, right: clicks.right + 1 }
+```
+
+crea una copia di `clicks` dove `right` è incrementato di 1.
+
+### 3.2 Perché non mutare lo stato direttamente
+
+Questo è sconsigliato:
+
+```js
+const handleLeftClick = () => {
+  clicks.left++
+  setClicks(clicks)
+}
+```
+
+Anche se “sembra funzionare”, mutare direttamente lo stato può causare comportamenti strani e bug difficili da debuggare. In React, aggiorni lo stato creando un **nuovo oggetto** (o un nuovo array).
+
+### 3.3 Nota pratica: oggetto unico vs stati separati
+
+In questa app specifica, mettere tutto in un solo oggetto non porta vantaggi e rende il codice più complesso. Due `useState` separati hanno più senso.
+
+---
+
+## 4) Handling arrays: tenere traccia della storia dei click
+
+Aggiungiamo uno stato `allClicks` che registra ogni click:
+
+```jsx
+const App = () => {
+  const [left, setLeft] = useState(0)
+  const [right, setRight] = useState(0)
+  const [allClicks, setAll] = useState([])
+
+  const handleLeftClick = () => {
+    setAll(allClicks.concat('L'))
+    setLeft(left + 1)
+  }
+
+  const handleRightClick = () => {
+    setAll(allClicks.concat('R'))
+    setRight(right + 1)
+  }
+
+  return (
+    <div>
+      {left}
+      <button onClick={handleLeftClick}>left</button>
+      <button onClick={handleRightClick}>right</button>
+      {right}
+
+      <p>{allClicks.join(' ')}</p>
+    </div>
+  )
+}
+```
+
+- `allClicks` parte da array vuoto: `useState([])`
+- `concat` crea **un nuovo array**, non muta quello esistente
+- `join(' ')` unisce gli elementi in una stringa separata da spazi
+
+### 4.1 Perché non usare `push`
+
+Questo è sconsigliato:
+
+```js
+const handleLeftClick = () => {
+  allClicks.push('L')
+  setAll(allClicks)
+  setLeft(left + 1)
+}
+```
+
+`push` muta l’array esistente. Anche se a prima vista sembra ok, può creare bug inaspettati.
+
+---
+
+## 5) Aggiornare lo stato è asincrono (e può “laggare” di 1)
+
+Espandiamo l’app aggiungendo `total`:
+
+```jsx
+const App = () => {
+  const [left, setLeft] = useState(0)
+  const [right, setRight] = useState(0)
+  const [allClicks, setAll] = useState([])
+  const [total, setTotal] = useState(0)
+
+  const handleLeftClick = () => {
+    setAll(allClicks.concat('L'))
+    setLeft(left + 1)
+    setTotal(left + right)
+  }
+
+  const handleRightClick = () => {
+    setAll(allClicks.concat('R'))
+    setRight(right + 1)
+    setTotal(left + right)
+  }
+
+  return (
+    <div>
+      {left}
+      <button onClick={handleLeftClick}>left</button>
+      <button onClick={handleRightClick}>right</button>
+      {right}
+
+      <p>{allClicks.join(' ')}</p>
+      <p>total {total}</p>
+    </div>
+  )
+}
+```
+
+Problema: `total` non mostra il valore atteso, spesso “rimane indietro” di 1.  
+Motivo: gli aggiornamenti di stato (`setLeft`, `setRight`) non cambiano `left/right` **immediatamente** dentro la stessa esecuzione dell’handler. React applica gli update e poi fa re-render.
+
+### 5.1 Fix: calcolare un valore aggiornato localmente
+
+```jsx
+const handleLeftClick = () => {
+  setAll(allClicks.concat('L'))
+  const updatedLeft = left + 1
+  setLeft(updatedLeft)
+  setTotal(updatedLeft + right)
+}
+```
+
+E per il destro:
+
+```jsx
+const handleRightClick = () => {
+  setAll(allClicks.concat('R'))
+  const updatedRight = right + 1
+  setRight(updatedRight)
+  setTotal(left + updatedRight)
+}
+```
+
+### 5.2 Nota pratica (utile in React): functional updates
+
+Un approccio robusto è usare la forma “funzione” dei setter, che legge sempre lo stato più aggiornato:
+
+```jsx
+setLeft(prev => prev + 1)
+setAll(prev => prev.concat('L'))
+```
+
+Questo aiuta quando ci sono update multipli ravvicinati.
+
+---
+
+## 6) Conditional rendering: componente `History`
+
+Possiamo gestire il rendering della storia click con un componente dedicato:
+
+```jsx
+const History = (props) => {
+  if (props.allClicks.length === 0) {
+    return <div>the app is used by pressing the buttons</div>
+  }
+
+  return (
+    <div>
+      button press history: {props.allClicks.join(' ')}
+    </div>
+  )
+}
+```
+
+Uso dentro `App`:
+
+```jsx
+const App = () => {
+  // ...
+
+  return (
+    <div>
+      {left}
+      <button onClick={handleLeftClick}>left</button>
+      <button onClick={handleRightClick}>right</button>
+      {right}
+
+      <History allClicks={allClicks} />
+    </div>
+  )
+}
+```
+
+Qui `History` mostra output diverso a seconda dello stato: questo è **conditional rendering**.
+
+---
+
+## 7) Refactor: componente `Button`
+
+```jsx
+const Button = ({ onClick, text }) => (
+  <button onClick={onClick}>{text}</button>
+)
+```
+
+Esempio completo:
+
+```jsx
+const History = (props) => {
+  if (props.allClicks.length === 0) {
+    return <div>the app is used by pressing the buttons</div>
+  }
+
+  return (
+    <div>
+      button press history: {props.allClicks.join(' ')}
+    </div>
+  )
+}
+
+const Button = ({ onClick, text }) => (
+  <button onClick={onClick}>{text}</button>
+)
+
+const App = () => {
+  const [left, setLeft] = useState(0)
+  const [right, setRight] = useState(0)
+  const [allClicks, setAll] = useState([])
+
+  const handleLeftClick = () => {
+    setAll(allClicks.concat('L'))
+    setLeft(left + 1)
+  }
+
+  const handleRightClick = () => {
+    setAll(allClicks.concat('R'))
+    setRight(right + 1)
+  }
+
+  return (
+    <div>
+      {left}
+      <Button onClick={handleLeftClick} text="left" />
+      <Button onClick={handleRightClick} text="right" />
+      {right}
+
+      <History allClicks={allClicks} />
+    </div>
+  )
+}
+```
+
+---
+
+## 8) Regole degli Hook
+
+Gli Hook (come `useState`) hanno regole precise:
+
+- chiamali **solo** nel top-level di un componente React
+- non chiamarli dentro:
+  - loop
+  - conditionals
+  - funzioni annidate
+- chiamali sempre nello stesso ordine ad ogni render
+
+In pratica: `useState` e simili devono stare nel corpo del componente, non dentro `if` o `for`.
+
+---
+
+## 9) Event handling revisited: l’handler deve essere una funzione
+
+Partiamo da questa app:
+
+```jsx
+const App = () => {
+  const [value, setValue] = useState(10)
+
+  return (
+    <div>
+      {value}
+      <button>reset to zero</button>
+    </div>
+  )
+}
+```
+
+Vogliamo che il bottone resetti `value`.
+
+### 9.1 Errori comuni
+
+Esempio sbagliato: passi un numero (non una funzione)
+
+```jsx
+<button onClick={value + 1}>button</button>
+```
+
+Esempio sbagliato: fai un assignment (non una funzione)
+
+```jsx
+<button onClick={value = 0}>button</button>
+```
+
+Esempio ingannevole:
+
+```jsx
+<button onClick={console.log('clicked the button')}>
+  button
+</button>
+```
+
+Qui `console.log(...)` viene eseguito durante il render e `onClick` riceve `undefined`.
+
+Altro errore:
+
+```jsx
+<button onClick={setValue(0)}>button</button>
+```
+
+`setValue(0)` viene chiamata durante il render e può causare un loop di render.
+
+### 9.2 Corretto: passa una funzione (spesso una arrow)
+
+```jsx
+<button onClick={() => setValue(0)}>button</button>
+```
+
+Oppure definisci l’handler a parte:
+
+```jsx
+const App = () => {
+  const [value, setValue] = useState(10)
+
+  const handleClick = () => {
+    console.log('clicked the button')
+  }
+
+  return (
+    <div>
+      {value}
+      <button onClick={handleClick}>button</button>
+    </div>
+  )
+}
+```
+
+---
+
+## 10) Funzioni che ritornano funzioni
+
+Puoi definire un event handler usando una funzione che **ritorna** una funzione.
+
+Esempio:
+
+```jsx
+const App = () => {
+  const [value, setValue] = useState(10)
+
+  const hello = () => {
+    const handler = () => console.log('hello world')
+    return handler
+  }
+
+  return (
+    <div>
+      {value}
+      <button onClick={hello()}>button</button>
+    </div>
+  )
+}
+```
+
+Perché funziona?
+
+- `hello()` viene eseguita durante il render
+- ma `hello()` ritorna una funzione
+- quella funzione diventa il vero handler di `onClick`
+
+Di fatto React riceve qualcosa come:
+
+```jsx
+<button onClick={() => console.log('hello world')}>button</button>
+```
+
+### 10.1 Perché può essere utile: parametri
+
+```jsx
+const App = () => {
+  const [value, setValue] = useState(10)
+
+  const hello = (who) => {
+    return () => {
+      console.log('hello', who)
+    }
+  }
+
+  return (
+    <div>
+      {value}
+      <button onClick={hello('world')}>button</button>
+      <button onClick={hello('react')}>button</button>
+      <button onClick={hello('function')}>button</button>
+    </div>
+  )
+}
+```
+
+Versione compatta:
+
+```js
+const hello = (who) => () => {
+  console.log('hello', who)
+}
+```
+
+### 10.2 Stesso pattern per settare valori
+
+```jsx
+const App = () => {
+  const [value, setValue] = useState(10)
+
+  const setToValue = (newValue) => () => {
+    console.log('value now', newValue)
+    setValue(newValue)
+  }
+
+  return (
+    <div>
+      {value}
+      <button onClick={setToValue(1000)}>thousand</button>
+      <button onClick={setToValue(0)}>reset</button>
+      <button onClick={setToValue(value + 1)}>increment</button>
+    </div>
+  )
+}
+```
+
+Nota: non è necessario usare questo pattern per casi semplici. Si può anche fare così:
+
+```jsx
+const setToValue = (newValue) => {
+  console.log('value now', newValue)
+  setValue(newValue)
+}
+
+<button onClick={() => setToValue(1000)}>thousand</button>
+```
+
+---
+
+## 11) Passare event handlers ai componenti figli
+
+Esempio: estraiamo un componente `Button`:
+
+```jsx
+const Button = (props) => (
+  <button onClick={props.onClick}>
+    {props.text}
+  </button>
+)
+```
+
+Uso:
+
+```jsx
+const App = () => {
+  const [value, setValue] = useState(10)
+
+  const setToValue = (newValue) => {
+    console.log('value now', newValue)
+    setValue(newValue)
+  }
+
+  return (
+    <div>
+      {value}
+      <Button onClick={() => setToValue(1000)} text="thousand" />
+      <Button onClick={() => setToValue(0)} text="reset" />
+      <Button onClick={() => setToValue(value + 1)} text="increment" />
+    </div>
+  )
+}
+```
+
+---
+
+## 12) Non definire componenti dentro altri componenti
+
+Questo “sembra funzionare”, ma è una cattiva pratica:
+
+```jsx
+const App = () => {
+  const [value, setValue] = useState(10)
+
+  const Display = (props) => <div>{props.value}</div>
+
+  return (
+    <div>
+      <Display value={value} />
+    </div>
+  )
+}
+```
+
+Motivo (in breve):
+- ad ogni render, `Display` viene ridefinito come “nuovo componente”
+- questo può portare a problemi e comportamento inatteso, e rende più difficile ottimizzare e ragionare sul rendering
+
+Meglio definire i componenti **fuori** dal componente principale:
+
+```jsx
+const Display = (props) => <div>{props.value}</div>
+
+const App = () => {
+  const [value, setValue] = useState(10)
+
+  return (
+    <div>
+      <Display value={value} />
+    </div>
+  )
+}
+```
+
+---
+
 
 ## 5) React: props e componenti
 
@@ -607,7 +1249,6 @@ const App = () => {
   return (
     <div>
       <Display counter={counter} />
-
       <Button onClick={increaseByOne} text="plus" />
       <Button onClick={setToZero} text="zero" />
       <Button onClick={decreaseByOne} text="minus" />
@@ -625,3 +1266,4 @@ const App = () => {
 5. Display riceve nuove props e mostra il valore aggiornato.
 
 ---
+
