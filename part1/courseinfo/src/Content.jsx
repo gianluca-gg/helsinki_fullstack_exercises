@@ -1,12 +1,13 @@
 import Part from './Part';
 
 const Content = (props) => {
-    console.log(props)
+    const {parts} = props;
+    console.log(parts);
     return (
         <div>
-        <Part part={props.parts[0].name} exercise={props.parts[0].exercises} />
-        <Part part={props.parts[1].name} exercise={props.parts[1].exercises} />
-        <Part part={props.parts[2].name} exercise={props.parts[2].exercises} />
+     {parts.map(part => 
+          <Part key={part.id} name={part.name} exercise={part.exercises}/>
+        )}
         </div>
     )
 }
